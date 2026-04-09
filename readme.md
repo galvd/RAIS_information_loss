@@ -2,6 +2,8 @@
 
 Este repositório contém a infraestrutura em Python para processamento e visualização espacial de dados de emprego, renda e densidade empresarial. O projeto utiliza dados cruzados da RAIS e do Cadastro Nacional da Pessoa Jurídica (CNPJ) referentes a 2023 para gerar mapas de calor em grades hexagonais de alta resolução (H3 da Uber). Essa metodologia protege, mesmo utilizando dados públicos abertos, o sigilo individual das empresas ao mesmo tempo que revela com precisão a densidade econômica e o mercado de trabalho no Espírito Santo (ES).
 
+**[Clique aqui para acessar painel com os mapas](https://galvd.github.io/RAIS_information_loss/)**
+
 ## Possibilidades Analíticas
 
 A base de dados consolidada possui as seguintes colunas estruturais: `data`, `total_cnpjs_no_cep`, `cep`, `id_municipio_nome`, `cnae_subclasse`, `cnae_subclasse_desc`, `cnae_classe_num`, `cnae_classe_desc`, `media_salarial_da_classe`, `media_vinculos_da_classe`, `centroide_cep`.
