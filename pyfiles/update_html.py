@@ -52,7 +52,7 @@ TEMPLATE_HTML = """<!DOCTYPE html>
         </header>
         
         <div class="intro-text">
-            <p>Este painel apresenta a distribuição microespacial do mercado de trabalho no ES. Os dados cruzam informações da RAIS e do Cadastro Nacional da Pessoa Jurídica (CNPJ) de 2023, agregados em grades hexagonais de alta resolução (H3). Essa metodologia protege o sigilo individual das empresas ao mesmo tempo que revela com precisão a densidade econômica, os polos geradores de emprego e as manchas de maior remuneração do território.</p>
+            <p>Este painel apresenta a distribuição microespacial do mercado de trabalho no ES. Os dados cruzam informações da RAIS e do Cadastro Nacional da Pessoa Jurídica (CNPJ) de 2024, último dado disponível, agregados em grades hexagonais de alta resolução (H3). Essa metodologia protege o sigilo individual das empresas ao mesmo tempo que revela com precisão a densidade econômica, os polos geradores de emprego e as manchas de maior remuneração do território.</p>
         </div>
 
         <details open>

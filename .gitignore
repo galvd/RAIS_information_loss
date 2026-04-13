@@ -8,6 +8,8 @@ bin-release/
 *.json
 *.sql
 *.pyc
+*2024.csv
+*2023.csv
 
 # Executables
 *.swf
