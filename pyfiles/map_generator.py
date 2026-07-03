@@ -26,7 +26,7 @@ def gerar_mapa_estatico_salarios(df, pasta_destino):
 
     m = iniciar_mapa(df_base)
     cores = ['#fef0d9', '#fdcc8a', '#fc8d59', '#e34a33', '#b30000']
-    colormap, min_val, max_val = criar_colormap(df_hex['media_salarial_ponderada'], 'Média Salarial Ponderada (R$) - Normalizada 40h', cores)
+    colormap, min_val, max_val = criar_colormap(df_hex['media_salarial_ponderada'], 'Média Salarial Ponderada (R$)', cores)
     colormap.add_to(m)
     injetar_css_legenda(m)
 
@@ -38,12 +38,49 @@ def gerar_mapa_estatico_salarios(df, pasta_destino):
                 'fillColor': color, 'color': 'black', 'weight': 0.5, 'fillOpacity': 0.7
             },
             tooltip=folium.Tooltip(
-                f"<b>Salário Médio Real:</b> R$ {row['media_salarial_ponderada']:,.2f}<br>"
+                f"<b>Salário Médio:</b> R$ {row['media_salarial_ponderada']:,.2f}<br>"
                 f"<b>Vínculos Estimados:</b> {row['soma_vinculos']:,.0f}"
             )
         ).add_to(m)
 
     caminho_html = os.path.join(pasta_destino, 'mapa_salarios_estatico.html')
+    m.save(caminho_html)
+
+
+def gerar_mapa_estatico_horas(df, pasta_destino):
+    df_base = preparar_dados_base(df, interativo=False)
+    df_base = df_base.dropna(subset=['media_horas_da_classe']).copy()
+    df_base['massa_horas'] = df_base['media_horas_da_classe'] * df_base['vinculos_totais']
+
+    df_hex = df_base.groupby('hex_id').agg(
+        soma_massa_horas=('massa_horas', 'sum'),
+        soma_vinculos=('vinculos_totais', 'sum')
+    ).reset_index()
+
+    df_hex = df_hex[df_hex['soma_vinculos'] > 0].copy()
+    df_hex['media_horas_ponderada'] = df_hex['soma_massa_horas'] / df_hex['soma_vinculos']
+    df_hex['geometry'] = df_hex['hex_id'].apply(get_hex_polygon)
+
+    m = iniciar_mapa(df_base)
+    cores = ['#edf8fb', '#b2e2e2', '#66c2a4', '#2ca25f', '#006d2c']
+    colormap, min_val, max_val = criar_colormap(df_hex['media_horas_ponderada'], 'Média de Horas Contratadas (semanais)', cores)
+    colormap.add_to(m)
+    injetar_css_legenda(m)
+
+    for _, row in df_hex.iterrows():
+        val = max(min(row['media_horas_ponderada'], max_val), min_val)
+        folium.GeoJson(
+            {"type": "Feature", "geometry": row['geometry']},
+            style_function=lambda feature, color=colormap(val): {
+                'fillColor': color, 'color': 'black', 'weight': 0.5, 'fillOpacity': 0.7
+            },
+            tooltip=folium.Tooltip(
+                f"<b>Horas Médias:</b> {row['media_horas_ponderada']:,.1f} h/sem<br>"
+                f"<b>Vínculos Estimados:</b> {row['soma_vinculos']:,.0f}"
+            )
+        ).add_to(m)
+
+    caminho_html = os.path.join(pasta_destino, 'mapa_horas_estatico.html')
     m.save(caminho_html)
 
 
@@ -145,7 +182,7 @@ def gerar_mapa_interativo_salarios(df, pasta_destino):
             },
             tooltip=folium.Tooltip(
                 f"<b>Município:</b> {row['id_municipio_nome']}<br>"
-                f"<b>Salário Médio Real:</b> R$ {row['media_salarial_ponderada']:,.2f}<br>"
+                f"<b>Salário Médio:</b> R$ {row['media_salarial_ponderada']:,.2f}<br>"
                 f"<b>Vínculos Estimados:</b> {row['soma_vinculos']:,.0f}"
             )
         ).add_to(hex_group)

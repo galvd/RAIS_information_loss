@@ -2,8 +2,10 @@ import os
 import pandas as pd
 from settings.settings import load_config
 from pyfiles.update_html import atualizar_paineis
+from pyfiles.table_generator import gerar_tabela_salarios
 from pyfiles.map_generator import (
                                     gerar_mapa_estatico_salarios,
+                                    gerar_mapa_estatico_horas,
                                     gerar_mapa_estatico_vinculos,
                                     gerar_mapa_estatico_cnpjs
 )
@@ -22,14 +24,16 @@ if __name__ == "__main__":
     if os.path.exists(caminho_dados):
         df = pd.read_csv(caminho_dados)
         print(f"Dados carregados: {df.shape[0]} registros.")
-        
+
         print("\n--- ETAPA 2: Geração dos Mapas Estáticos ---")
         gerar_mapa_estatico_salarios(df, pasta_destino=pasta_mapas)
+        gerar_mapa_estatico_horas(df, pasta_destino=pasta_mapas)
         gerar_mapa_estatico_vinculos(df, pasta_destino=pasta_mapas)
         gerar_mapa_estatico_cnpjs(df, pasta_destino=pasta_mapas)
 
         print("\n--- ETAPA 3: Geração do Dashboard Web (HTML) ---")
-        atualizar_paineis()
-        
+        dados_json, mun_options = gerar_tabela_salarios(df)
+        atualizar_paineis(dados_json, mun_options)
+
     else:
         print(f"ERRO: Base de dados não encontrada em {caminho_dados}.")
