@@ -29,11 +29,14 @@ TEMPLATE_HTML = """<!DOCTYPE html>
 
         iframe { width: 100%; height: 750px; border: none; display: block; }
 
+        /* Subtítulo interno de bloco */
+        .bloco-sub { padding: 16px 20px 4px; font-size: 1.05rem; font-weight: bold; color: var(--primary); border-top: 1px solid #eee; }
+
         /* Tabela top 10 */
         .tabela-wrapper { padding: 20px; }
-        .tabela-controles { margin-bottom: 15px; }
+        .tabela-controles { margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-end; }
         .tabela-controles label { font-weight: bold; margin-right: 10px; }
-        .tabela-controles select { padding: 6px 10px; font-size: 0.95rem; border: 1px solid #ccc; border-radius: 5px; min-width: 260px; }
+        .tabela-controles select { padding: 6px 10px; font-size: 0.95rem; border: 1px solid #ccc; border-radius: 5px; min-width: 240px; }
         table.top-salarios { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
         table.top-salarios th, table.top-salarios td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
         table.top-salarios th { background: var(--primary); color: white; }
@@ -41,6 +44,16 @@ TEMPLATE_HTML = """<!DOCTYPE html>
         table.top-salarios tr:nth-child(even) { background: #f6f8fa; }
         table.top-salarios td.rank { text-align: center; font-weight: bold; color: var(--accent); width: 40px; }
         .nota-metodologica { margin-top: 15px; padding: 12px 15px; font-size: 0.85rem; color: #555; line-height: 1.5; background: #f1f3f5; border-left: 3px solid var(--primary); border-radius: 4px; }
+
+        /* Painel de horas */
+        .horas-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 10px; }
+        .horas-card { background: #f6f8fa; border: 1px solid #e3e7eb; border-radius: 8px; padding: 14px 16px; }
+        .horas-card .rotulo { font-size: 0.8rem; color: #777; text-transform: uppercase; letter-spacing: 0.03em; }
+        .horas-card .valor { font-size: 1.6rem; font-weight: bold; color: var(--primary); margin-top: 4px; }
+        .horas-card .unid { font-size: 0.9rem; font-weight: normal; color: #999; }
+        .horas-card.destaque { background: #fdeee9; border-color: #f2c4b6; grid-column: span 2; }
+        .horas-card.destaque .valor { color: var(--accent); }
+        .horas-meta { margin-top: 12px; font-size: 0.85rem; color: #666; }
 
         .links-topo { margin: 15px 0; line-height: 1.6; }
         .links-topo a { color: var(--accent); text-decoration: none; font-weight: bold; }
@@ -68,14 +81,16 @@ TEMPLATE_HTML = """<!DOCTYPE html>
         </div>
 
         <details open>
-            <summary>Top 10 Salários por Atividade Econômica (Classe CNAE)</summary>
+            <summary>Salários por Atividade Econômica</summary>
             <div class="content">
                 <div class="tabela-wrapper">
                     <div class="tabela-controles">
-                        <label for="tab-filtro-mun">Município:</label>
-                        <select id="tab-filtro-mun" onchange="renderTabelaSalarios()">
-                            __TABELA_MUN_OPTIONS__
-                        </select>
+                        <div>
+                            <label for="tab-filtro-mun">Município:</label><br>
+                            <select id="tab-filtro-mun" onchange="renderTabelaSalarios()">
+                                __TABELA_MUN_OPTIONS__
+                            </select>
+                        </div>
                     </div>
                     <table class="top-salarios">
                         <thead>
@@ -89,20 +104,37 @@ TEMPLATE_HTML = """<!DOCTYPE html>
                         <tbody id="tab-body"></tbody>
                     </table>
                     <div class="nota-metodologica">
-                        <strong>Nota metodológica:</strong> Os salários são apresentados em valor médio nominal, refletindo a remuneração média efetivamente contratada por vínculo na classe. Para garantir robustez estatística, foram excluídas as classes CNAE abaixo de um limiar mínimo de vínculos por recorte (<strong>50 na Região Metropolitana da Grande Vitória</strong> e <strong>20 nos demais municípios</strong>), bem como o <strong>0,5% superior</strong> da distribuição salarial (remoção de outliers). No agregado estadual ("Todos os Municípios"), o salário de cada classe corresponde à média ponderada pelo número de vínculos entre os municípios.
+                        <strong>Nota metodológica:</strong> Os salários são apresentados em valor médio nominal refletindo a remuneração média efetivamente contratada por vínculo na classe. Para garantir robustez estatística, foram excluídas as classes CNAE abaixo de um limiar mínimo de vínculos por recorte (<strong>50 na Região Metropolitana da Grande Vitória</strong> e <strong>20 nos demais municípios</strong>), bem como o <strong>0,5% superior</strong> da distribuição salarial (remoção de outliers). No agregado estadual ("Todos os Municípios"), o salário de cada classe corresponde à média ponderada pelo número de vínculos entre os municípios.
                     </div>
                 </div>
+                <div class="bloco-sub">Distribuição espacial dos salários</div>
+                <iframe src="maps/mapa_salarios_estatico.html" loading="lazy"></iframe>
             </div>
         </details>
 
         <details>
-            <summary>Densidade de Salários</summary>
-            <div class="content"><iframe src="maps/mapa_salarios_estatico.html" loading="lazy"></iframe></div>
-        </details>
-
-        <details>
-            <summary>Média de Horas Contratadas</summary>
-            <div class="content"><iframe src="maps/mapa_horas_estatico.html" loading="lazy"></iframe></div>
+            <summary>Horas Trabalhadas</summary>
+            <div class="content">
+                <div class="tabela-wrapper">
+                    <div class="tabela-controles">
+                        <div>
+                            <label for="horas-filtro-reg">Região:</label><br>
+                            <select id="horas-filtro-reg" onchange="onRegiaoChange()"></select>
+                        </div>
+                        <div>
+                            <label for="horas-filtro-mun">Recorte:</label><br>
+                            <select id="horas-filtro-mun" onchange="renderHoras()"></select>
+                        </div>
+                    </div>
+                    <div class="horas-grid" id="horas-grid"></div>
+                    <div class="horas-meta" id="horas-meta"></div>
+                    <div class="nota-metodologica">
+                        <strong>Nota metodológica:</strong> Refere-se às <strong>horas contratadas semanais</strong> por vínculo (RAIS). Como a base disponibiliza a média por classe CNAE, média, mediana, desvio-padrão e o intervalo de 95% são calculados sobre a distribuição das médias por classe, ponderadas pelo número de vínculos. Foi aplicado corte de 0,5% em cada cauda da distribuição de horas (remoção de outliers). O intervalo de 95% (média ± 1,96 desvio-padrão) é uma aproximação da faixa em que se concentra a jornada da maioria dos vínculos formais.
+                    </div>
+                </div>
+                <div class="bloco-sub">Distribuição espacial das horas contratadas</div>
+                <iframe src="maps/mapa_horas_estatico.html" loading="lazy"></iframe>
+            </div>
         </details>
 
         <details>
@@ -120,6 +152,7 @@ TEMPLATE_HTML = """<!DOCTYPE html>
 
     <script>
         const DADOS_TABELA = __TABELA_DADOS_JSON__;
+        const PAINEL_HORAS = __PAINEL_HORAS_JSON__;
 
         function renderTabelaSalarios() {
             const mun = document.getElementById('tab-filtro-mun').value;
@@ -136,7 +169,67 @@ TEMPLATE_HTML = """<!DOCTYPE html>
                     '</tr>';
             }).join('');
         }
-        document.addEventListener('DOMContentLoaded', renderTabelaSalarios);
+
+        // ---- Painel de horas ----
+        function initHoras() {
+            const selReg = document.getElementById('horas-filtro-reg');
+            const regioes = Object.keys(PAINEL_HORAS.regioes);
+            const ordenadas = ['Estado'].concat(regioes.filter(function (r) { return r !== 'Estado'; }).sort());
+            selReg.innerHTML = ordenadas.map(function (r) {
+                return '<option value="' + r + '">' + (r === 'Estado' ? 'Estado (ES)' : r) + '</option>';
+            }).join('');
+            onRegiaoChange();
+        }
+
+        function onRegiaoChange() {
+            const reg = document.getElementById('horas-filtro-reg').value;
+            const selMun = document.getElementById('horas-filtro-mun');
+            const muns = PAINEL_HORAS.regioes[reg] || [];
+            let opts;
+            if (reg === 'Estado') {
+                opts = ['<option value="estado">Agregado do Estado</option>'];
+            } else {
+                opts = ['<option value="reg:' + reg + '">Agregado da Região</option>'];
+            }
+            opts = opts.concat(muns.map(function (m) {
+                return '<option value="mun:' + m + '">' + m + '</option>';
+            }));
+            selMun.innerHTML = opts.join('');
+            renderHoras();
+        }
+
+        function card(rotulo, valor, unid, destaque) {
+            return '<div class="horas-card' + (destaque ? ' destaque' : '') + '">' +
+                '<div class="rotulo">' + rotulo + '</div>' +
+                '<div class="valor">' + valor + (unid ? ' <span class="unid">' + unid + '</span>' : '') + '</div>' +
+                '</div>';
+        }
+
+        function renderHoras() {
+            const chave = document.getElementById('horas-filtro-mun').value;
+            const s = PAINEL_HORAS.stats[chave];
+            const grid = document.getElementById('horas-grid');
+            const meta = document.getElementById('horas-meta');
+            if (!s) {
+                grid.innerHTML = '';
+                meta.textContent = 'Sem dados suficientes para este recorte.';
+                return;
+            }
+            grid.innerHTML =
+                card('Média', s.media, 'h/sem') +
+                card('Mediana', s.mediana, 'h/sem') +
+                card('Desvio-padrão', s.desvio, 'h') +
+                card('Mínimo', s.min, 'h/sem') +
+                card('Máximo', s.max, 'h/sem') +
+                card('Intervalo de 95% dos vínculos', s.ic95_inf + ' – ' + s.ic95_sup, 'h/sem', true);
+            meta.textContent = 'Base: ' + s.n_classes.toLocaleString('pt-BR') +
+                ' classes CNAE · ' + s.vinculos.toLocaleString('pt-BR') + ' vínculos estimados.';
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            renderTabelaSalarios();
+            initHoras();
+        });
     </script>
 </body>
 </html>
@@ -146,7 +239,7 @@ TEMPLATE_HTML = """<!DOCTYPE html>
 # MOTOR DE INJEÇÃO
 # ==========================================
 
-def atualizar_paineis(dados_json, mun_options):
+def atualizar_paineis(dados_json, mun_options, horas_json):
     print("[Web Generator] Gerando página HTML...")
     pasta_raiz = os.getcwd()
 
@@ -157,6 +250,7 @@ def atualizar_paineis(dados_json, mun_options):
         .replace("__DATA_ATUALIZACAO__", data_formatada)
         .replace("__TABELA_MUN_OPTIONS__", mun_options)
         .replace("__TABELA_DADOS_JSON__", dados_json)
+        .replace("__PAINEL_HORAS_JSON__", horas_json)
     )
 
     caminho_html = os.path.join(pasta_raiz, 'index.html')

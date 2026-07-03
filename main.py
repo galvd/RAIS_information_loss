@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from settings.settings import load_config
 from pyfiles.update_html import atualizar_paineis
-from pyfiles.table_generator import gerar_tabela_salarios
+from pyfiles.table_generator import gerar_tabela_salarios, gerar_painel_horas
 from pyfiles.map_generator import (
                                     gerar_mapa_estatico_salarios,
                                     gerar_mapa_estatico_horas,
@@ -33,7 +33,8 @@ if __name__ == "__main__":
 
         print("\n--- ETAPA 3: Geração do Dashboard Web (HTML) ---")
         dados_json, mun_options = gerar_tabela_salarios(df)
-        atualizar_paineis(dados_json, mun_options)
+        horas_json = gerar_painel_horas(df)
+        atualizar_paineis(dados_json, mun_options, horas_json)
 
     else:
         print(f"ERRO: Base de dados não encontrada em {caminho_dados}.")
