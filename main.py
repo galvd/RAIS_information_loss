@@ -32,9 +32,9 @@ if __name__ == "__main__":
         gerar_mapa_estatico_cnpjs(df, pasta_destino=pasta_mapas)
 
         print("\n--- ETAPA 3: Geração do Dashboard Web (HTML) ---")
-        dados_json, mun_options = gerar_tabela_salarios(df)
+        dados_json = gerar_tabela_salarios(df)
         horas_json = gerar_painel_horas(df)
-        atualizar_paineis(dados_json, mun_options, horas_json)
+        atualizar_paineis(dados_json, horas_json)
 
     else:
         print(f"ERRO: Base de dados não encontrada em {caminho_dados}.")

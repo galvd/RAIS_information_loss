@@ -1,4 +1,15 @@
 import json
+import unicodedata
+
+
+def chave_alfabetica(texto):
+    """Chave de ordenacao que ignora acentos/cedilha, para que 'Águia Branca'
+    e 'São Mateus' fiquem na posicao alfabetica correta (ao lado de 'A...' e
+    'S...' sem acento), em vez de irem parar no fim por causa do codigo
+    Unicode das letras acentuadas. O texto original (com acento) continua
+    sendo exibido normalmente; a chave e usada so para comparacao."""
+    sem_acento = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('ASCII')
+    return sem_acento.lower()
 
 # Municípios da Região Metropolitana da Grande Vitória (limiar de 50 vínculos)
 RMGV = {'Vitória', 'Vila Velha', 'Serra', 'Cariacica', 'Viana', 'Guarapari', 'Fundão'}
@@ -25,8 +36,41 @@ MUN_PARA_REGIAO = {m: r for r, ms in REGIOES.items() for m in ms}
 # TABELA TOP 10 SALÁRIOS
 # ==========================================
 
+def _top10_linhas(sub):
+    """Converte um recorte (ja filtrado pelo limiar) nas 10 linhas de maior salario."""
+    top = sub.sort_values('salario', ascending=False).head(10)
+    return [
+        {
+            'classe': r['cnae_classe_num'],
+            'desc': r['cnae_classe_desc'],
+            'salario': round(float(r['salario']), 2),
+            'vinculos': float(r['vinculos'])
+        }
+        for _, r in top.iterrows()
+    ]
+
+
+def _top10_agregado(sub, limiar):
+    """Agrega a classe entre varios municipios (media ponderada por vinculos),
+    aplica o limiar e devolve o top10. Usado para recortes regionais e estadual,
+    do mesmo jeito que o nivel estadual ja fazia antes desta funcao existir."""
+    tmp = sub.copy()
+    tmp['ws'] = tmp['salario'] * tmp['vinculos']
+    agg = tmp.groupby(['cnae_classe_num', 'cnae_classe_desc'], as_index=False).agg(
+        ws=('ws', 'sum'), vinculos=('vinculos', 'sum')
+    )
+    agg = agg[agg['vinculos'] >= limiar].copy()
+    if agg.empty:
+        return []
+    agg['salario'] = agg['ws'] / agg['vinculos']
+    return _top10_linhas(agg)
+
+
 def gerar_dados_tabela(df):
-    """Agrega por município + classe CNAE. Retorna dict {municipio: [top10], 'Todos': [top10]}."""
+    """Agrega por município + classe CNAE. Retorna {'stats': {...}, 'regioes': {...}},
+    no mesmo padrão do painel de horas trabalhadas: chaves 'mun:MUNICIPIO',
+    'reg:REGIAO' e 'estado' em stats, e a lista de municípios por região em
+    'regioes' para alimentar o filtro em cascata Região -> Recorte."""
     df2 = df.dropna(subset=['media_salarial_da_classe', 'media_vinculos_da_classe']).copy()
 
     df2['cnae_classe_num'] = df2['cnae_classe_num'].apply(
@@ -46,58 +90,45 @@ def gerar_dados_tabela(df):
     limite_sup_sal = g['salario'].quantile(0.995)
     g = g[g['salario'] <= limite_sup_sal].copy()
 
-    resultado = {}
+    stats = {}
 
-    # Top 10 por município: limiar de vínculos varia por porte (RMGV=50, interior=20)
-    g['limiar'] = g['id_municipio_nome'].apply(
-        lambda mun: LIMIAR_RMGV if mun in RMGV else LIMIAR_INTERIOR
-    )
-    g_mun = g[g['vinculos'] >= g['limiar']]
-    for mun, sub in g_mun.groupby('id_municipio_nome'):
-        top = sub.sort_values('salario', ascending=False).head(10)
-        resultado[mun] = [
-            {
-                'classe': r['cnae_classe_num'],
-                'desc': r['cnae_classe_desc'],
-                'salario': round(float(r['salario']), 2),
-                'vinculos': float(r['vinculos'])
-            }
-            for _, r in top.iterrows()
-        ]
+    # Por município: limiar de vínculos varia por porte (RMGV=50, interior=20)
+    for mun, sub in g.groupby('id_municipio_nome'):
+        limiar = LIMIAR_RMGV if mun in RMGV else LIMIAR_INTERIOR
+        linhas = _top10_linhas(sub[sub['vinculos'] >= limiar])
+        if linhas:
+            stats[f'mun:{mun}'] = linhas
 
-    # Nível estadual: agrega a classe primeiro, média ponderada por vínculos, corte de 50.
-    g['ws'] = g['salario'] * g['vinculos']
-    est = g.groupby(['cnae_classe_num', 'cnae_classe_desc'], as_index=False).agg(
-        ws=('ws', 'sum'),
-        vinculos=('vinculos', 'sum')
-    )
-    est = est[est['vinculos'] >= LIMIAR_RMGV].copy()
-    est['salario'] = est['ws'] / est['vinculos']
-    top_est = est.sort_values('salario', ascending=False).head(10)
-    resultado['Todos'] = [
-        {
-            'classe': r['cnae_classe_num'],
-            'desc': r['cnae_classe_desc'],
-            'salario': round(float(r['salario']), 2),
-            'vinculos': float(r['vinculos'])
-        }
-        for _, r in top_est.iterrows()
-    ]
+    # Por região de planejamento: agrega os municípios da região, limiar único (50),
+    # mesma lógica de média ponderada que já era usada no agregado estadual.
+    g['regiao'] = g['id_municipio_nome'].map(MUN_PARA_REGIAO).fillna('Indefinido')
+    for reg, sub in g.groupby('regiao'):
+        linhas = _top10_agregado(sub, LIMIAR_RMGV)
+        if linhas:
+            stats[f'reg:{reg}'] = linhas
 
-    return resultado
+    # Estado: agrega tudo, limiar 50 (era a chave 'Todos'; agora 'estado', igual ao painel de horas)
+    stats['estado'] = _top10_agregado(g, LIMIAR_RMGV)
 
+    # Lista de municípios por região, para o filtro em cascata (mesmo padrão do painel de horas)
+    muns_disponiveis = set(g['id_municipio_nome'].unique())
+    regioes_lista = {'Estado': sorted(muns_disponiveis, key=chave_alfabetica)}
+    for reg, ms in REGIOES.items():
+        presentes = sorted([m for m in ms if m in muns_disponiveis], key=chave_alfabetica)
+        if presentes:
+            regioes_lista[reg] = presentes
 
-def montar_options(dados):
-    municipios = sorted([m for m in dados.keys() if m != 'Todos'])
-    opts = ["<option value='Todos'>Todos os Municípios</option>"]
-    opts += [f"<option value=\"{m}\">{m}</option>" for m in municipios]
-    return "".join(opts)
+    return {'stats': stats, 'regioes': regioes_lista}
 
 
 def gerar_tabela_salarios(df):
-    """Retorna (dados_json, mun_options) prontos para injeção no HTML."""
+    """Retorna o JSON pronto para injeção no HTML (estrutura com 'stats' e
+    'regioes', no mesmo padrão do painel de horas). ATENÇÃO: esta função deixou
+    de devolver (dados_json, mun_options) — agora devolve só dados_json, já que
+    o dropdown de município é montado dinamicamente em JS a partir de 'regioes',
+    e não mais gerado como HTML pronto no Python."""
     dados = gerar_dados_tabela(df)
-    return json.dumps(dados, ensure_ascii=False), montar_options(dados)
+    return json.dumps(dados, ensure_ascii=False)
 
 
 # ==========================================
@@ -172,9 +203,9 @@ def gerar_dados_horas(df):
 
     # Lista de municípios por região (para o filtro em cascata)
     muns_disponiveis = set(gh['id_municipio_nome'].unique())
-    regioes_lista = {'Estado': sorted(muns_disponiveis)}
+    regioes_lista = {'Estado': sorted(muns_disponiveis, key=chave_alfabetica)}
     for reg, ms in REGIOES.items():
-        presentes = sorted([m for m in ms if m in muns_disponiveis])
+        presentes = sorted([m for m in ms if m in muns_disponiveis], key=chave_alfabetica)
         if presentes:
             regioes_lista[reg] = presentes
 
