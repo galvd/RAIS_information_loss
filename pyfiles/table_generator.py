@@ -114,6 +114,26 @@ def media_ponderada(g, chaves, col_valor='salario', col_peso='vinculos'):
     return out.drop(columns='_ws')
 
 
+def _vinculos_por_par(df, col_peso_saida='vinc_row'):
+    """Vinculos do par (municipio, classe) para cada linha do CSV.
+
+    Prefere `total_vinculos_municipio_classe` (total exportado direto pela query,
+    constante dentro do par) sobre a reconstrucao
+    media_vinculos_da_classe * total_cnpjs_no_cep, que reintroduz o erro do
+    ROUND(vinculos/cnpjs, 2) -- 0,19% na mediana, ate 1,5% no percentil 95, e
+    pior nas classes com muitos CNPJs e poucos vinculos.
+
+    Com a coluna direta o valor e CONSTANTE no par: as funcoes que agregam usam
+    'first'. Sem ela, o valor e por linha e precisa ser somado. O flag devolvido
+    diz qual agregacao aplicar.
+    """
+    if 'total_vinculos_municipio_classe' in df.columns:
+        df[col_peso_saida] = df['total_vinculos_municipio_classe']
+        return df, 'first'
+    df[col_peso_saida] = df['media_vinculos_da_classe'] * df['total_cnpjs_no_cep']
+    return df, 'sum'
+
+
 # ==========================================
 # TABELA TOP 10 SALÁRIOS
 # ==========================================
@@ -153,13 +173,13 @@ def gerar_dados_tabela(df):
 
     df2['cnae_classe_num'] = df2['cnae_classe_num'].apply(cnae_key)
     df2['cnae_classe_desc'] = df2['cnae_classe_desc'].fillna('Indefinido').astype(str)
-    df2['vinc_row'] = df2['media_vinculos_da_classe'] * df2['total_cnpjs_no_cep']
+    df2, _agg = _vinculos_por_par(df2)
 
     g = df2.groupby(
         ['id_municipio_nome', 'cnae_classe_num', 'cnae_classe_desc'], as_index=False
     ).agg(
         salario=('media_salarial_da_classe', 'first'),
-        vinculos=('vinc_row', 'sum')
+        vinculos=('vinc_row', _agg)
     )
 
     # 1. Corte do 0,5% superior, ponderado por vinculos.
@@ -259,12 +279,12 @@ def gerar_dados_horas(df):
     de vinculos por recorte."""
     df2 = df.dropna(subset=['media_horas_da_classe', 'media_vinculos_da_classe']).copy()
     df2['cnae_classe_num'] = df2['cnae_classe_num'].apply(cnae_key)
-    df2['peso'] = df2['media_vinculos_da_classe'] * df2['total_cnpjs_no_cep']
+    df2, _agg = _vinculos_por_par(df2, 'peso')
 
-    # Uma média de horas por (município, classe); peso = vínculos estimados
+    # Uma média de horas por (município, classe); peso = vínculos do par
     gh = df2.groupby(['id_municipio_nome', 'cnae_classe_num'], as_index=False).agg(
         horas=('media_horas_da_classe', 'first'),
-        peso=('peso', 'sum')
+        peso=('peso', _agg)
     )
     gh = gh[gh['peso'] > 0].copy()
 
