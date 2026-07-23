@@ -1,4 +1,5 @@
 import json
+import math
 import unicodedata
 
 
@@ -11,10 +12,20 @@ def chave_alfabetica(texto):
     sem_acento = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('ASCII')
     return sem_acento.lower()
 
+
+# ==========================================
+# METODOLOGIA
+# ==========================================
+# Espelha o tratamento do aggregator.py do Observatorio de Empresas do ES.
+# Sao dois arquivos independentes por opcao de projeto: se alterar aqui,
+# altere la tambem, senao os dois paineis voltam a divergir.
+
 # Municípios da Região Metropolitana da Grande Vitória (limiar de 50 vínculos)
 RMGV = {'Vitória', 'Vila Velha', 'Serra', 'Cariacica', 'Viana', 'Guarapari', 'Fundão'}
-LIMIAR_RMGV = 50
-LIMIAR_INTERIOR = 20
+LIMIAR_RMGV = 50        # agregado estadual, agregados regionais e municípios da RMGV
+LIMIAR_INTERIOR = 20    # demais municípios
+OUTLIER_SUP = 0.995     # mantém os 99,5% inferiores da distribuição
+OUTLIER_INF = 0.005     # cauda inferior (usada só nas horas)
 
 # Microrregiões de Planejamento do ES (IJSN / Lei 9.768, atualizada pela 11.174/2020)
 REGIOES = {
@@ -30,6 +41,77 @@ REGIOES = {
     'Noroeste': ['Águia Branca', 'Mantenópolis', 'Barra de São Francisco', 'Nova Venécia', 'Vila Pavão', 'Água Doce do Norte', 'Ecoporanga'],
 }
 MUN_PARA_REGIAO = {m: r for r, ms in REGIOES.items() for m in ms}
+
+
+def cnae_key(x):
+    """Chave canonica da classe CNAE: 5 digitos, string.
+
+    O codigo trafega entre BigQuery, CSV e JSON e pode chegar como float
+    ('1113.0'), int (1113) ou sem o zero a esquerda ('1113'). Sem normalizar,
+    a chave nao casa entre os paineis e o cruzamento falha em silencio."""
+    return str(x).split('.')[0].strip().zfill(5)
+
+
+def limiar_do_municipio(municipio):
+    return LIMIAR_RMGV if municipio in RMGV else LIMIAR_INTERIOR
+
+
+def corte_ponderado(df, col_valor, col_peso, sup=OUTLIER_SUP, inf=None):
+    """Corte de cauda PONDERADO POR VINCULOS.
+
+    Ponderado = corta os 0,5% dos TRABALHADORES no extremo, nao as 0,5% das
+    LINHAS de maior valor. A diferenca e decisiva: as linhas (municipio, classe)
+    com 1 a 15 vinculos tem medias erraticas, ocupam o topo da distribuicao e
+    definem o cutoff, derrubando junto classes legitimas logo abaixo.
+
+    Medido no dado real de 2025: o corte por linha -- g['salario'].quantile(0.995),
+    que era o metodo usado aqui -- removia 57 linhas somando apenas 1,2% dos
+    trabalhadores; eliminava "Bancos de Desenvolvimento" (172 vinculos) por ficar
+    2,2% acima do cutoff, e descartava Vitoria inteira da classe 06000 -- 2.117
+    dos 2.711 trabalhadores -- publicando "Extracao de petroleo = R$ 10.410"
+    calculado sobre 451 pessoas.
+
+    `inf` corta tambem a cauda inferior (usado nas horas, que tem outlier
+    relevante nas duas pontas: jornadas minimas e jornadas irreais).
+    """
+    d = df.dropna(subset=[col_valor]).copy()
+    d = d[d[col_peso] > 0]
+    if d.empty:
+        return d
+    d = d.sort_values(col_valor)
+    total = float(d[col_peso].sum())
+    if total <= 0:
+        return d
+    acum = d[col_peso].cumsum()
+    mask = acum <= sup * total
+    if inf is not None:
+        mask &= acum >= inf * total
+    return d[mask].copy()
+
+
+def limiar_municipal(g, col_peso='vinculos'):
+    """Exclui (municipio, classe) abaixo do limiar do municipio: RMGV 50, demais 20."""
+    v = g.groupby(['id_municipio_nome', 'cnae_classe_num'])[col_peso].transform('sum')
+    lim = g['id_municipio_nome'].map(limiar_do_municipio)
+    return g[v >= lim].copy()
+
+
+def limiar_agregado(g, chaves_extra=None, col_peso='vinculos', limiar=LIMIAR_RMGV):
+    """Exclui classes abaixo do limiar no agregado. chaves_extra=['regiao'] aplica
+    o limiar DENTRO de cada regiao; None aplica no total estadual."""
+    chaves = list(chaves_extra or []) + ['cnae_classe_num']
+    v = g.groupby(chaves)[col_peso].transform('sum')
+    return g[v >= limiar].copy()
+
+
+def media_ponderada(g, chaves, col_valor='salario', col_peso='vinculos'):
+    """Agrega por `chaves` com media ponderada por vinculos."""
+    d = g.copy()
+    d['_ws'] = d[col_valor] * d[col_peso]
+    out = d.groupby(chaves, as_index=False).agg(_ws=('_ws', 'sum'),
+                                                vinculos=(col_peso, 'sum'))
+    out[col_valor] = out['_ws'] / out['vinculos']
+    return out.drop(columns='_ws')
 
 
 # ==========================================
@@ -50,32 +132,26 @@ def _top10_linhas(sub):
     ]
 
 
-def _top10_agregado(sub, limiar):
-    """Agrega a classe entre varios municipios (media ponderada por vinculos),
-    aplica o limiar e devolve o top10. Usado para recortes regionais e estadual,
-    do mesmo jeito que o nivel estadual ja fazia antes desta funcao existir."""
-    tmp = sub.copy()
-    tmp['ws'] = tmp['salario'] * tmp['vinculos']
-    agg = tmp.groupby(['cnae_classe_num', 'cnae_classe_desc'], as_index=False).agg(
-        ws=('ws', 'sum'), vinculos=('vinculos', 'sum')
-    )
-    agg = agg[agg['vinculos'] >= limiar].copy()
-    if agg.empty:
-        return []
-    agg['salario'] = agg['ws'] / agg['vinculos']
-    return _top10_linhas(agg)
-
-
 def gerar_dados_tabela(df):
     """Agrega por município + classe CNAE. Retorna {'stats': {...}, 'regioes': {...}},
     no mesmo padrão do painel de horas trabalhadas: chaves 'mun:MUNICIPIO',
     'reg:REGIAO' e 'estado' em stats, e a lista de municípios por região em
-    'regioes' para alimentar o filtro em cascata Região -> Recorte."""
+    'regioes' para alimentar o filtro em cascata Região -> Recorte.
+
+    Metodologia (identica ao aggregator.py do Observatorio):
+      1. corte do 0,5% superior PONDERADO POR VINCULOS, aplicado UMA VEZ sobre
+         as linhas (municipio, classe);
+      2. limiar minimo de vinculos por recorte, aplicado DEPOIS do corte;
+      3. media ponderada por vinculos dentro de cada recorte.
+
+    Cada recorte usa sua propria base filtrada, porque o limiar e POR RECORTE:
+    uma classe pequena pode nao passar num municipio do interior e passar no
+    agregado estadual. Filtrar uma vez so daria numeros inconsistentes entre
+    os cortes.
+    """
     df2 = df.dropna(subset=['media_salarial_da_classe', 'media_vinculos_da_classe']).copy()
 
-    df2['cnae_classe_num'] = df2['cnae_classe_num'].apply(
-        lambda x: str(x).split('.')[0].zfill(5)
-    )
+    df2['cnae_classe_num'] = df2['cnae_classe_num'].apply(cnae_key)
     df2['cnae_classe_desc'] = df2['cnae_classe_desc'].fillna('Indefinido').astype(str)
     df2['vinc_row'] = df2['media_vinculos_da_classe'] * df2['total_cnpjs_no_cep']
 
@@ -86,29 +162,34 @@ def gerar_dados_tabela(df):
         vinculos=('vinc_row', 'sum')
     )
 
-    # Corte do 0,5% superior (remoção de outliers de salário)
-    limite_sup_sal = g['salario'].quantile(0.995)
-    g = g[g['salario'] <= limite_sup_sal].copy()
+    # 1. Corte do 0,5% superior, ponderado por vinculos.
+    g = corte_ponderado(g, col_valor='salario', col_peso='vinculos', sup=OUTLIER_SUP)
+    if g.empty:
+        return {'stats': {}, 'regioes': {}}
+    g['regiao'] = g['id_municipio_nome'].map(MUN_PARA_REGIAO).fillna('Indefinido')
 
     stats = {}
+    chaves_classe = ['cnae_classe_num', 'cnae_classe_desc']
 
-    # Por município: limiar de vínculos varia por porte (RMGV=50, interior=20)
-    for mun, sub in g.groupby('id_municipio_nome'):
-        limiar = LIMIAR_RMGV if mun in RMGV else LIMIAR_INTERIOR
-        linhas = _top10_linhas(sub[sub['vinculos'] >= limiar])
+    # 2a. Por municipio: limiar por porte (RMGV 50, interior 20).
+    base_mun = limiar_municipal(g)
+    for mun, sub in base_mun.groupby('id_municipio_nome'):
+        linhas = _top10_linhas(media_ponderada(sub, chaves_classe))
         if linhas:
             stats[f'mun:{mun}'] = linhas
 
-    # Por região de planejamento: agrega os municípios da região, limiar único (50),
-    # mesma lógica de média ponderada que já era usada no agregado estadual.
-    g['regiao'] = g['id_municipio_nome'].map(MUN_PARA_REGIAO).fillna('Indefinido')
-    for reg, sub in g.groupby('regiao'):
-        linhas = _top10_agregado(sub, LIMIAR_RMGV)
+    # 2b. Por regiao de planejamento: limiar 50 sobre o total DA REGIAO,
+    #     media ponderada entre os municipios da regiao.
+    base_reg = limiar_agregado(g, chaves_extra=['regiao'])
+    for reg, sub in base_reg.groupby('regiao'):
+        linhas = _top10_linhas(media_ponderada(sub, chaves_classe))
         if linhas:
             stats[f'reg:{reg}'] = linhas
 
-    # Estado: agrega tudo, limiar 50 (era a chave 'Todos'; agora 'estado', igual ao painel de horas)
-    stats['estado'] = _top10_agregado(g, LIMIAR_RMGV)
+    # 2c. Estado: limiar 50 sobre o total estadual.
+    base_est = limiar_agregado(g)
+    if not base_est.empty:
+        stats['estado'] = _top10_linhas(media_ponderada(base_est, chaves_classe))
 
     # Lista de municípios por região, para o filtro em cascata (mesmo padrão do painel de horas)
     muns_disponiveis = set(g['id_municipio_nome'].unique())
@@ -137,7 +218,6 @@ def gerar_tabela_salarios(df):
 
 def _stats_ponderadas(sub):
     """Estatísticas ponderadas por vínculos sobre as médias de horas por classe."""
-    import math
     sub = sub.sort_values('horas')
     h = sub['horas'].tolist()
     w = sub['peso'].tolist()
@@ -172,9 +252,13 @@ def _stats_ponderadas(sub):
 
 
 def gerar_dados_horas(df):
-    """Estatísticas de horas contratadas por município, região e estado."""
+    """Estatísticas de horas contratadas por município, região e estado.
+
+    Mesma metodologia do painel de salarios: corte ponderado (aqui nas DUAS
+    caudas, porque horas tem outlier relevante nas duas pontas) e limiar minimo
+    de vinculos por recorte."""
     df2 = df.dropna(subset=['media_horas_da_classe', 'media_vinculos_da_classe']).copy()
-    df2['cnae_classe_num'] = df2['cnae_classe_num'].apply(lambda x: str(x).split('.')[0].zfill(5))
+    df2['cnae_classe_num'] = df2['cnae_classe_num'].apply(cnae_key)
     df2['peso'] = df2['media_vinculos_da_classe'] * df2['total_cnpjs_no_cep']
 
     # Uma média de horas por (município, classe); peso = vínculos estimados
@@ -184,22 +268,30 @@ def gerar_dados_horas(df):
     )
     gh = gh[gh['peso'] > 0].copy()
 
-    # Corte de 0,5% em cada cauda (ponderado por vínculos) para remover outliers de horas
-    gh = gh.sort_values('horas')
-    acum = gh['peso'].cumsum()
-    total_peso = gh['peso'].sum()
-    inf = acum >= 0.005 * total_peso
-    sup = acum <= 0.995 * total_peso
-    gh = gh[inf & sup].copy()
-
+    # 1. Corte de 0,5% em cada cauda, ponderado por vínculos.
+    gh = corte_ponderado(gh, col_valor='horas', col_peso='peso',
+                         sup=OUTLIER_SUP, inf=OUTLIER_INF)
+    if gh.empty:
+        return {'regioes': {}, 'stats': {}}
     gh['regiao'] = gh['id_municipio_nome'].map(MUN_PARA_REGIAO).fillna('Indefinido')
 
+    # 2. Limiar de vinculos por recorte (mesma regra dos salarios).
     stats = {}
-    stats['estado'] = _stats_ponderadas(gh)
-    for reg, sub in gh.groupby('regiao'):
-        stats[f'reg:{reg}'] = _stats_ponderadas(sub)
-    for mun, sub in gh.groupby('id_municipio_nome'):
-        stats[f'mun:{mun}'] = _stats_ponderadas(sub)
+    base_est = limiar_agregado(gh, col_peso='peso')
+    if not base_est.empty:
+        stats['estado'] = _stats_ponderadas(base_est)
+
+    base_reg = limiar_agregado(gh, chaves_extra=['regiao'], col_peso='peso')
+    for reg, sub in base_reg.groupby('regiao'):
+        st = _stats_ponderadas(sub)
+        if st:
+            stats[f'reg:{reg}'] = st
+
+    base_mun = limiar_municipal(gh, col_peso='peso')
+    for mun, sub in base_mun.groupby('id_municipio_nome'):
+        st = _stats_ponderadas(sub)
+        if st:
+            stats[f'mun:{mun}'] = st
 
     # Lista de municípios por região (para o filtro em cascata)
     muns_disponiveis = set(gh['id_municipio_nome'].unique())
